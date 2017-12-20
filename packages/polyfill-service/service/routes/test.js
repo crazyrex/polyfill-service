@@ -2,7 +2,7 @@
 
 'use strict';
 
-const polyfillio = require('polyfill-library');
+const polyfillio = require('@marionebl/polyfill-library');
 const express = require('express');
 const fs = require('graceful-fs');
 const path = require('path');

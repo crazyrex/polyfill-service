@@ -5,11 +5,11 @@ const path = require('path');
 const request = require('request-promise');
 const Handlebars = require('handlebars');
 const moment = require('moment');
-const sources = require('polyfill-library/lib/sources');
+const sources = require('@marionebl/polyfill-library/lib/sources');
 const marky = require('marky-markdown');
 const zlib = require('zlib');
 const PolyfillSet = require('../PolyfillSet');
-const polyfillservice = require('polyfill-library');
+const polyfillservice = require('@marionebl/polyfill-library');
 const compatdata = require('../../../../docs/assets/compat.json');
 const appVersion = require(path.join(__dirname,'../../../../package.json')).version;
 const RumReport = require('../RumReport.js').Perf;
@@ -305,7 +305,7 @@ function route(req, res, next) {
 		const one_week = one_hour * 24 * 7;
 		res.set('Cache-Control', 'public, max-age=' + one_hour + ', stale-while-revalidate=' + one_week + ', stale-if-error=' + one_week);
 	} else if (locals.pageName === 'contributing/authoring-polyfills') {
-		locals.baselines = require('polyfill-library/lib/UA').getBaselines();
+		locals.baselines = require('@marionebl/polyfill-library/lib/UA').getBaselines();
 	}
 
 	template(locals.pageName)

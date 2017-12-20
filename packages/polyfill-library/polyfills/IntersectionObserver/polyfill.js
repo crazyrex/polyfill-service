@@ -27,11 +27,6 @@ if ('IntersectionObserver' in window &&
 }
 
 
-// Use :root element of the document for .contains() calls because older IEs
-// support Node.prototype.contains only on Element nodes.
-var docElement = document.documentElement;
-
-
 /**
  * An IntersectionObserver registry. This registry exists to hold a strong
  * reference to IntersectionObserver instances currently observering a target
@@ -53,14 +48,25 @@ function IntersectionObserverEntry(entry) {
   this.rootBounds = entry.rootBounds;
   this.boundingClientRect = entry.boundingClientRect;
   this.intersectionRect = entry.intersectionRect || getEmptyRect();
-  this.isIntersecting = !!entry.intersectionRect;
+  try {
+    this.isIntersecting = !!entry.intersectionRect;
+  } catch (err) {
+    // This means we are using the IntersectionObserverEntry polyfill which has only defined a getter
+  }
 
-  // Calculates the intersection ratio. Sets it to 0 if the target area is 0.
+  // Calculates the intersection ratio.
   var targetRect = this.boundingClientRect;
   var targetArea = targetRect.width * targetRect.height;
   var intersectionRect = this.intersectionRect;
   var intersectionArea = intersectionRect.width * intersectionRect.height;
-  this.intersectionRatio = targetArea ? (intersectionArea / targetArea) : 0;
+
+  // Sets intersection ratio.
+  if (targetArea) {
+    this.intersectionRatio = intersectionArea / targetArea;
+  } else {
+    // If area is zero and is intersecting, sets to 1, otherwise to 0
+    this.intersectionRatio = this.isIntersecting ? 1 : 0;
+  }
 }
 
 
@@ -317,7 +323,9 @@ IntersectionObserver.prototype._checkForIntersections = function() {
       intersectionRect: intersectionRect
     });
 
-    if (rootIsInDom && rootContainsTarget) {
+    if (!oldEntry) {
+      this._queuedEntries.push(newEntry);
+    } else if (rootIsInDom && rootContainsTarget) {
       // If the new entry intersection ratio has crossed any of the
       // thresholds, add a new entry.
       if (this._hasCrossedThreshold(oldEntry, newEntry)) {
@@ -359,25 +367,32 @@ IntersectionObserver.prototype._computeTargetAndRootIntersection =
 
   var targetRect = getBoundingClientRect(target);
   var intersectionRect = targetRect;
-  var parent = target.parentNode;
+  var parent = getParentNode(target);
   var atRoot = false;
 
   while (!atRoot) {
     var parentRect = null;
+    var parentComputedStyle = parent.nodeType == 1 ?
+        window.getComputedStyle(parent) : {};
 
-    // If we're at the root element, set parentRect to the already
-    // calculated rootRect.
-    if (parent == this.root || parent.nodeType != 1) {
+    // If the parent isn't displayed, an intersection can't happen.
+    if (parentComputedStyle.display == 'none') return;
+
+    if (parent == this.root || parent == document) {
       atRoot = true;
       parentRect = rootRect;
-    }
-    // Otherwise check to see if the parent element hides overflow,
-    // and if so update parentRect.
-    else {
-      if (window.getComputedStyle(parent).overflow != 'visible') {
+    } else {
+      // If the element has a non-visible overflow, and it's not the <body>
+      // or <html> element, update the intersection rect.
+      // Note: <body> and <html> cannot be clipped to a rect that's not also
+      // the document rect, so no need to compute a new intersection.
+      if (parent != document.body &&
+          parent != document.documentElement &&
+          parentComputedStyle.overflow != 'visible') {
         parentRect = getBoundingClientRect(parent);
       }
     }
+
     // If either of the above conditionals set a new parentRect,
     // calculate new intersection data.
     if (parentRect) {
@@ -385,7 +400,7 @@ IntersectionObserver.prototype._computeTargetAndRootIntersection =
 
       if (!intersectionRect) break;
     }
-    parent = parent.parentNode;
+    parent = getParentNode(parent);
   }
   return intersectionRect;
 };
@@ -483,7 +498,7 @@ IntersectionObserver.prototype._hasCrossedThreshold =
  * @private
  */
 IntersectionObserver.prototype._rootIsInDom = function() {
-  return !this.root || docElement.contains(this.root);
+  return !this.root || containsDeep(document, this.root);
 };
 
 
@@ -494,7 +509,7 @@ IntersectionObserver.prototype._rootIsInDom = function() {
  * @private
  */
 IntersectionObserver.prototype._rootContainsTarget = function(target) {
-  return (this.root || docElement).contains(target);
+  return containsDeep(this.root || document, target);
 };
 
 
@@ -619,11 +634,19 @@ function computeRectIntersection(rect1, rect2) {
  * @return {Object} The (possibly shimmed) rect of the element.
  */
 function getBoundingClientRect(el) {
-  var rect = el.getBoundingClientRect();
-  if (!rect) return;
+  var rect;
+
+  try {
+    rect = el.getBoundingClientRect();
+  } catch (err) {
+    // Ignore Windows 7 IE11 "Unspecified error"
+    // https://github.com/WICG/IntersectionObserver/pull/205
+  }
+
+  if (!rect) return getEmptyRect();
 
   // Older IE
-  if (!rect.width || !rect.height) {
+  if (!(rect.width && rect.height)) {
     rect = {
       top: rect.top,
       right: rect.right,
@@ -651,6 +674,40 @@ function getEmptyRect() {
     width: 0,
     height: 0
   };
+}
+
+/**
+ * Checks to see if a parent element contains a child elemnt (including inside
+ * shadow DOM).
+ * @param {Node} parent The parent element.
+ * @param {Node} child The child element.
+ * @return {boolean} True if the parent node contains the child node.
+ */
+function containsDeep(parent, child) {
+  var node = child;
+  while (node) {
+    if (node == parent) return true;
+
+    node = getParentNode(node);
+  }
+  return false;
+}
+
+
+/**
+ * Gets the parent node of an element or its host element if the parent node
+ * is a shadow root.
+ * @param {Node} node The node whose parent to get.
+ * @return {Node|null} The parent node or null if no parent exists.
+ */
+function getParentNode(node) {
+  var parent = node.parentNode;
+
+  if (parent && parent.nodeType == 11 && parent.host) {
+    // If the parent is a shadow root, return the host element.
+    return parent.host;
+  }
+  return parent;
 }
 
 
